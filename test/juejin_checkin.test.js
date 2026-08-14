@@ -292,7 +292,7 @@ test('runAccount checks free count after an idempotent check-in response', async
   const result = await runAccount('sessionid=test-b', 2, async () => {
     calls += 1;
     return calls === 1
-      ? { err_no: 15001, err_msg: '您今日已经签到' }
+      ? { err_no: 15001, err_msg: '您今日已完成签到，请勿重复签到' }
       : { err_no: 0, err_msg: 'success', data: { free_count: 0 } };
   });
 
@@ -300,6 +300,20 @@ test('runAccount checks free count after an idempotent check-in response', async
   assert.equal(calls, 2);
   assert.match(result.lines.join('\n'), /今日已签到/);
   assert.match(result.lines.join('\n'), /无免费抽奖次数/);
+});
+
+test('runAccount does not treat a duplicate-check validation error as already checked in', async () => {
+  let calls = 0;
+  const result = await runAccount('sessionid=test-b', 2, async () => {
+    calls += 1;
+    return calls === 1
+      ? { err_no: 19999, err_msg: '重复签到状态异常' }
+      : { err_no: 0, err_msg: 'success', data: { free_count: 1 } };
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(calls, 1);
+  assert.match(result.lines.join('\n'), /签到失败：重复签到状态异常/);
 });
 
 test('runAccount redacts individual cookie fields from request errors', async () => {

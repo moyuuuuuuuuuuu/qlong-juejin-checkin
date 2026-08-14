@@ -207,7 +207,7 @@ async function createBrowserSession(browser, cookie, { userAgent } = {}) {
 }
 
 function isAlreadyCheckedIn(result) {
-  return /已经签到|已签到/.test(result.message);
+  return /已经签到|已签到|已完成签到|请勿重复签到/.test(result.message);
 }
 
 function checkInLine(data = {}) {
