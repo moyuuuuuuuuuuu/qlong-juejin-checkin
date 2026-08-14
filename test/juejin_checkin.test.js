@@ -8,6 +8,8 @@ const path = require('node:path');
 
 const {
   parseCookies,
+  parseBrowserCookies,
+  extractJuejinUuid,
   businessResult,
   redact,
   parseHttpJsonResponse,
@@ -36,6 +38,34 @@ test('parseCookies supports newlines and ampersands', () => {
     parseCookies('sessionid=a\nsessionid=b&sessionid=c'),
     ['sessionid=a', 'sessionid=b', 'sessionid=c'],
   );
+});
+
+test('parseBrowserCookies converts a Cookie header for a Juejin browser context', () => {
+  assert.deepEqual(
+    parseBrowserCookies('sessionid=test-session; csrf_session_id=test-csrf'),
+    [
+      {
+        name: 'sessionid',
+        value: 'test-session',
+        domain: '.juejin.cn',
+        path: '/',
+        secure: true,
+      },
+      {
+        name: 'csrf_session_id',
+        value: 'test-csrf',
+        domain: '.juejin.cn',
+        path: '/',
+        secure: true,
+      },
+    ],
+  );
+});
+
+test('extractJuejinUuid reads the double-encoded web_id cookie', () => {
+  const cookie = '__tea_cookie_tokens_2608=%257B%2522web_id%2522%253A%25221234567890123456789%2522%257D; sessionid=test';
+
+  assert.equal(extractJuejinUuid(cookie), '1234567890123456789');
 });
 
 test('businessResult normalizes a successful Juejin response', () => {

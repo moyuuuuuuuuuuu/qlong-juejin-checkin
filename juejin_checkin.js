@@ -25,6 +25,46 @@ function parseCookies(raw = '') {
     .filter(Boolean);
 }
 
+function parseCookiePairs(cookie) {
+  return String(cookie)
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const separator = item.indexOf('=');
+      if (separator <= 0) return null;
+      return {
+        name: item.slice(0, separator).trim(),
+        value: item.slice(separator + 1).trim(),
+      };
+    })
+    .filter((item) => item?.name);
+}
+
+function parseBrowserCookies(cookie) {
+  return parseCookiePairs(cookie).map(({ name, value }) => ({
+    name,
+    value,
+    domain: '.juejin.cn',
+    path: '/',
+    secure: true,
+  }));
+}
+
+function extractJuejinUuid(cookie) {
+  const token = parseCookiePairs(cookie)
+    .find(({ name }) => name === '__tea_cookie_tokens_2608')?.value;
+  if (!token) throw new Error('Cookie 缺少 __tea_cookie_tokens_2608，无法提取浏览器 UUID');
+  try {
+    const data = JSON.parse(decodeURIComponent(decodeURIComponent(token)));
+    const uuid = data.web_id ?? data.user_unique_id;
+    if (!uuid) throw new Error('missing web_id');
+    return String(uuid);
+  } catch {
+    throw new Error('Cookie 中的浏览器 UUID 格式无效，请重新复制完整 Cookie');
+  }
+}
+
 function businessResult(response = {}) {
   const code = response.err_no ?? response.err_code ?? -1;
   return {
@@ -250,6 +290,8 @@ if (require.main === module) {
 module.exports = {
   ENDPOINTS,
   parseCookies,
+  parseBrowserCookies,
+  extractJuejinUuid,
   businessResult,
   redact,
   parseHttpJsonResponse,
