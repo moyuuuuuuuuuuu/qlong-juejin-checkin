@@ -1,3 +1,6 @@
+// cron: 0 10 * * *
+// new Env("掘金自动签到")
+
 'use strict';
 
 const https = require('node:https');

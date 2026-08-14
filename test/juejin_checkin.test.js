@@ -15,6 +15,21 @@ const {
   sendQinglongNotification,
 } = require('../juejin_checkin');
 
+function extractQinglongTask(script) {
+  const cron = script.match(/^\s*\/\/\s*cron:\s*(.+)$/m)?.[1]?.trim();
+  const name = script.match(/^\s*\/\/\s*new Env\(["'](.+)["']\)/m)?.[1];
+  return { cron, name };
+}
+
+test('QingLong subscription discovers the 10:00 check-in task', () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'juejin_checkin.js'), 'utf8');
+
+  assert.deepEqual(extractQinglongTask(script), {
+    cron: '0 10 * * *',
+    name: '掘金自动签到',
+  });
+});
+
 test('parseCookies supports newlines and ampersands', () => {
   assert.deepEqual(
     parseCookies('sessionid=a\nsessionid=b&sessionid=c'),
