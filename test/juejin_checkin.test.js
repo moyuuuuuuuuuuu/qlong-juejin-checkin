@@ -13,6 +13,8 @@ const {
   businessResult,
   redact,
   parseHttpJsonResponse,
+  createPageRequester,
+  createBrowserSession,
   runAccount,
   runAll,
   sendQinglongNotification,
@@ -92,6 +94,62 @@ test('parseHttpJsonResponse identifies an empty authenticated response', () => {
     () => parseHttpJsonResponse(200, ''),
     /接口返回空响应，Cookie 可能已失效或被掘金拒绝/,
   );
+});
+
+test('createPageRequester sends the signed base parameters through the page', async () => {
+  let pageInput;
+  const page = {
+    async evaluate(_callback, input) {
+      pageInput = input;
+      return {
+        status: 200,
+        text: '{"err_no":0,"err_msg":"success","data":{"incr_point":100}}',
+      };
+    },
+  };
+  const request = createPageRequester(page, '1234567890123456789');
+
+  const response = await request({
+    url: 'https://api.juejin.cn/growth_api/v1/check_in',
+    method: 'POST',
+    body: {},
+  });
+
+  assert.equal(
+    pageInput.url,
+    'https://api.juejin.cn/growth_api/v1/check_in?aid=2608&uuid=1234567890123456789&spider=0',
+  );
+  assert.equal(pageInput.method, 'POST');
+  assert.deepEqual(pageInput.body, {});
+  assert.equal(response.err_no, 0);
+});
+
+test('createBrowserSession injects cookies and closes its isolated context', async () => {
+  const events = [];
+  const page = {
+    async route(pattern) { events.push(['route', pattern]); },
+    async goto(url, options) { events.push(['goto', url, options.waitUntil]); },
+    async waitForTimeout(milliseconds) { events.push(['wait', milliseconds]); },
+  };
+  const context = {
+    async addCookies(cookies) { events.push(['cookies', cookies]); },
+    async newPage() { return page; },
+    async close() { events.push(['close']); },
+  };
+  const browser = {
+    async newContext() { events.push(['context']); return context; },
+  };
+
+  const session = await createBrowserSession(
+    browser,
+    '__tea_cookie_tokens_2608=%257B%2522web_id%2522%253A%25221234567890123456789%2522%257D; sessionid=test',
+  );
+  await session.close();
+
+  assert.equal(typeof session.request, 'function');
+  assert.equal(events[0][0], 'context');
+  assert.equal(events[1][0], 'cookies');
+  assert.deepEqual(events.at(-1), ['close']);
 });
 
 test('runAccount rejects a cookie without sessionid before making a request', async () => {

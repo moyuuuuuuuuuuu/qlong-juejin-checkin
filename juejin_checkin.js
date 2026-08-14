@@ -100,6 +100,59 @@ function parseHttpJsonResponse(statusCode, text) {
   }
 }
 
+function createPageRequester(page, uuid) {
+  return async ({ url, method = 'GET', body }) => {
+    const apiUrl = new URL(url);
+    apiUrl.searchParams.set('aid', '2608');
+    apiUrl.searchParams.set('uuid', uuid);
+    apiUrl.searchParams.set('spider', '0');
+
+    const response = await page.evaluate(
+      ({ url: requestUrl, method: requestMethod, body: requestBody }) => new Promise(
+        (resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open(requestMethod, requestUrl, true);
+          xhr.withCredentials = true;
+          xhr.timeout = 15000;
+          xhr.setRequestHeader('content-type', 'application/json');
+          xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
+          xhr.onerror = () => reject(new Error('浏览器请求网络错误'));
+          xhr.ontimeout = () => reject(new Error('浏览器请求超时（15000ms）'));
+          xhr.send(requestBody === undefined ? null : JSON.stringify(requestBody));
+        },
+      ),
+      { url: apiUrl.toString(), method, body },
+    );
+
+    return parseHttpJsonResponse(response.status, response.text);
+  };
+}
+
+async function createBrowserSession(browser, cookie) {
+  const context = await browser.newContext();
+  try {
+    await context.addCookies(parseBrowserCookies(cookie));
+    const page = await context.newPage();
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      if (['image', 'media', 'font'].includes(resourceType)) return route.abort();
+      return route.continue();
+    });
+    await page.goto('https://juejin.cn/user/center/signin?from=main_page', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+    await page.waitForTimeout(3000);
+    return {
+      request: createPageRequester(page, extractJuejinUuid(cookie)),
+      close: () => context.close(),
+    };
+  } catch (error) {
+    await context.close();
+    throw error;
+  }
+}
+
 function createHttpRequester({ timeoutMs = 15000 } = {}) {
   return ({ url, method = 'GET', cookie, body }) => new Promise((resolve, reject) => {
     const payload = body === undefined ? '' : JSON.stringify(body);
@@ -295,6 +348,8 @@ module.exports = {
   businessResult,
   redact,
   parseHttpJsonResponse,
+  createPageRequester,
+  createBrowserSession,
   createHttpRequester,
   runAccount,
   runAll,
