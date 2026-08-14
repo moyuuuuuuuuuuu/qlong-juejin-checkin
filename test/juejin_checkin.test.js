@@ -10,6 +10,7 @@ const {
   parseCookies,
   parseBrowserCookies,
   extractJuejinUuid,
+  buildBrowserUserAgent,
   businessResult,
   redact,
   parseHttpJsonResponse,
@@ -70,6 +71,14 @@ test('extractJuejinUuid reads the double-encoded web_id cookie', () => {
   const cookie = '__tea_cookie_tokens_2608=%257B%2522web_id%2522%253A%25221234567890123456789%2522%257D; sessionid=test';
 
   assert.equal(extractJuejinUuid(cookie), '1234567890123456789');
+});
+
+test('buildBrowserUserAgent matches Chromium without advertising headless mode', () => {
+  const userAgent = buildBrowserUserAgent('150.0.1234.5', 'linux');
+
+  assert.match(userAgent, /X11; Linux x86_64/);
+  assert.match(userAgent, /Chrome\/150\.0\.0\.0/);
+  assert.doesNotMatch(userAgent, /Headless/);
 });
 
 test('businessResult normalizes a successful Juejin response', () => {
@@ -139,18 +148,24 @@ test('createBrowserSession injects cookies and closes its isolated context', asy
     async close() { events.push(['close']); },
   };
   const browser = {
-    async newContext() { events.push(['context']); return context; },
+    async newContext(options) { events.push(['context', options]); return context; },
   };
 
   const session = await createBrowserSession(
     browser,
     '__tea_cookie_tokens_2608=%257B%2522web_id%2522%253A%25221234567890123456789%2522%257D; sessionid=test',
+    { userAgent: 'test-user-agent' },
   );
   await session.close();
 
   assert.equal(typeof session.request, 'function');
   assert.equal(events[0][0], 'context');
+  assert.equal(events[0][1].userAgent, 'test-user-agent');
   assert.equal(events[1][0], 'cookies');
+  assert.deepEqual(events.find((event) => event[0] === 'goto').slice(1), [
+    'https://juejin.cn/',
+    'networkidle',
+  ]);
   assert.deepEqual(events.at(-1), ['close']);
 });
 

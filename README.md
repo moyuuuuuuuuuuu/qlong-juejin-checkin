@@ -10,12 +10,46 @@
 - 重复运行时，“今日已签到”和“无免费抽奖次数”均按正常状态处理。
 - 自动尝试调用青龙的 `sendNotify.js`；通知模块不可用时仍会输出控制台结果。
 - 日志不会输出完整 Cookie 或其中的 Cookie 字段。
+- 通过无头 Chromium 执行网页请求，由掘金安全 SDK 动态生成 `msToken` 和 `a_bogus`。
 
 ## 运行要求
 
 - 青龙面板
 - Node.js 18 或更高版本
-- 不需要安装 npm 依赖
+- Chromium
+- NodeJS 依赖 `playwright-core`
+
+## 安装浏览器依赖
+
+当前方案需要真实浏览器生成掘金的动态安全签名。优先进入青龙“依赖管理” → “Linux” → “创建依赖”，填写：
+
+```text
+chromium
+```
+
+也可以在 Alpine 青龙终端立即安装：
+
+```bash
+apk add --no-cache chromium
+```
+
+然后进入青龙“依赖管理” → “NodeJS” → “创建依赖”，填写：
+
+```text
+playwright-core
+```
+
+等待两个依赖安装成功后，可在青龙终端检查 Chromium：
+
+```bash
+chromium --version
+```
+
+脚本默认查找 `/usr/bin/chromium` 和 `/usr/bin/chromium-browser`。如浏览器安装在其他位置，可增加环境变量：
+
+```text
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/实际路径/chromium
+```
 
 ## 获取 Cookie
 
@@ -36,7 +70,7 @@ Cookie 是登录凭证，请勿发到公开仓库、Issue、群聊或任务日�
 单账号示意：
 
 ```text
-sessionid=...; passport_csrf_token=...
+__tea_cookie_tokens_2608=...; sessionid=...; passport_csrf_token=...
 ```
 
 多账号支持两种格式。
@@ -93,6 +127,10 @@ sessionid=...; passport_csrf_token=...
 
 确认青龙环境变量名称严格为 `JJ_COOKIE`，变量已启用，并重新执行任务。
 
+### 提示缺少 Chromium 或 playwright-core
+
+按照“安装浏览器依赖”一节安装 Alpine 软件包 `chromium`，并在青龙 NodeJS 依赖管理中安装 `playwright-core`。依赖安装完成后重新执行签到任务。
+
 ### 执行订阅后没有自动生成任务
 
 确认订阅类型为“公开仓库”，白名单和黑名单均为空，然后重新执行一次订阅。脚本任务应显示为“掘金自动签到”，定时规则为 `0 10 * * *`。
@@ -101,7 +139,7 @@ sessionid=...; passport_csrf_token=...
 
 通常是 Cookie 已失效。重新登录掘金并更新完整 Cookie，避免只复制 `sessionid` 的局部值。
 
-如果提示“Cookie 缺少非空 sessionid”，说明环境变量内容不是有效的完整 Cookie。如果提示“接口返回空响应”，说明 Cookie 虽包含 `sessionid`，但登录状态已经失效或请求被掘金拒绝。两种情况都应重新登录掘金，从 `api.juejin.cn` 请求的 Request Headers 中复制最新完整 Cookie。
+如果提示“Cookie 缺少非空 sessionid”或“Cookie 缺少 __tea_cookie_tokens_2608”，说明环境变量内容不是有效的完整 Cookie。如果浏览器签名请求仍被拒绝，应重新登录掘金，从 `api.juejin.cn` 请求的 Request Headers 中复制最新完整 Cookie。
 
 ### 签到成功但没有抽奖
 

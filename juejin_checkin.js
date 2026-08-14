@@ -59,6 +59,15 @@ function extractJuejinUuid(cookie) {
   }
 }
 
+function buildBrowserUserAgent(version, platform = process.platform) {
+  const major = String(version).match(/^\d+/)?.[0] ?? '120';
+  const system = platform === 'win32'
+    ? 'Windows NT 10.0; Win64; x64'
+    : 'X11; Linux x86_64';
+  return `Mozilla/5.0 (${system}) AppleWebKit/537.36 (KHTML, like Gecko) `
+    + `Chrome/${major}.0.0.0 Safari/537.36`;
+}
+
 function businessResult(response = {}) {
   const code = response.err_no ?? response.err_code ?? -1;
   return {
@@ -122,8 +131,8 @@ function createPageRequester(page, uuid) {
   };
 }
 
-async function createBrowserSession(browser, cookie) {
-  const context = await browser.newContext();
+async function createBrowserSession(browser, cookie, { userAgent } = {}) {
+  const context = await browser.newContext({ userAgent, locale: 'zh-CN' });
   try {
     await context.addCookies(parseBrowserCookies(cookie));
     const page = await context.newPage();
@@ -132,8 +141,8 @@ async function createBrowserSession(browser, cookie) {
       if (['image', 'media', 'font'].includes(resourceType)) return route.abort();
       return route.continue();
     });
-    await page.goto('https://juejin.cn/user/center/signin?from=main_page', {
-      waitUntil: 'domcontentloaded',
+    await page.goto('https://juejin.cn/', {
+      waitUntil: 'networkidle',
       timeout: 30000,
     });
     await page.waitForTimeout(3000);
@@ -279,10 +288,11 @@ async function runBrowserTask({ rawCookies, chromium, executablePath, delay }) {
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
   try {
+    const userAgent = buildBrowserUserAgent(browser.version?.() ?? '120', process.platform);
     return await runAll({
       rawCookies,
       delay,
-      sessionFactory: (cookie) => createBrowserSession(browser, cookie),
+      sessionFactory: (cookie) => createBrowserSession(browser, cookie, { userAgent }),
     });
   } finally {
     await browser.close();
@@ -375,6 +385,7 @@ module.exports = {
   parseCookies,
   parseBrowserCookies,
   extractJuejinUuid,
+  buildBrowserUserAgent,
   businessResult,
   redact,
   parseHttpJsonResponse,
