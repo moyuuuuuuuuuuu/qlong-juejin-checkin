@@ -3,7 +3,6 @@
 
 'use strict';
 
-const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -12,11 +11,6 @@ const ENDPOINTS = Object.freeze({
   lotteryConfig: 'https://api.juejin.cn/growth_api/v1/lottery_config/get',
   lotteryDraw: 'https://api.juejin.cn/growth_api/v1/lottery/draw',
 });
-
-const DEFAULT_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-  + 'AppleWebKit/537.36 (KHTML, like Gecko) '
-  + 'Chrome/126.0.0.0 Safari/537.36';
 
 function parseCookies(raw = '') {
   return String(raw)
@@ -153,41 +147,6 @@ async function createBrowserSession(browser, cookie) {
   }
 }
 
-function createHttpRequester({ timeoutMs = 15000 } = {}) {
-  return ({ url, method = 'GET', cookie, body }) => new Promise((resolve, reject) => {
-    const payload = body === undefined ? '' : JSON.stringify(body);
-    const headers = {
-      Cookie: cookie,
-      'User-Agent': DEFAULT_USER_AGENT,
-      Origin: 'https://juejin.cn',
-      Referer: 'https://juejin.cn/',
-      Accept: 'application/json, text/plain, */*',
-      'Content-Type': 'application/json',
-    };
-    if (payload) headers['Content-Length'] = Buffer.byteLength(payload);
-
-    const request = https.request(url, { method, headers }, (response) => {
-      const chunks = [];
-      response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => {
-        const text = Buffer.concat(chunks).toString('utf8');
-        try {
-          resolve(parseHttpJsonResponse(response.statusCode, text));
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-
-    request.setTimeout(timeoutMs, () => {
-      request.destroy(new Error(`请求超时（${timeoutMs}ms）`));
-    });
-    request.on('error', reject);
-    if (payload) request.write(payload);
-    request.end();
-  });
-}
-
 function isAlreadyCheckedIn(result) {
   return /已经签到|已签到/.test(result.message);
 }
@@ -269,20 +228,90 @@ function defaultDelay() {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function runAll({ rawCookies, request, delay = defaultDelay }) {
+async function runAll({ rawCookies, request, sessionFactory, delay = defaultDelay }) {
   const cookies = parseCookies(rawCookies);
   if (cookies.length === 0) throw new Error('未配置 JJ_COOKIE');
 
   const results = [];
   for (let index = 0; index < cookies.length; index += 1) {
     if (index > 0) await delay();
-    results.push(await runAccount(cookies[index], index + 1, request));
+    let session;
+    let result;
+    try {
+      session = sessionFactory ? await sessionFactory(cookies[index]) : null;
+      result = await runAccount(
+        cookies[index],
+        index + 1,
+        session?.request ?? request,
+      );
+    } catch (error) {
+      result = {
+        ok: false,
+        lines: [
+          `账号${index + 1}`,
+          `浏览器会话启动失败：${redact(error?.message ?? error, [cookies[index]])}`,
+        ],
+      };
+    } finally {
+      if (session) {
+        try {
+          await session.close();
+        } catch (error) {
+          result = result ?? { ok: false, lines: [`账号${index + 1}`] };
+          result.ok = false;
+          result.lines.push(`关闭浏览器会话失败：${error?.message ?? error}`);
+        }
+      }
+    }
+    results.push(result);
   }
 
   return {
     ok: results.every((result) => result.ok),
     summary: results.flatMap((result) => result.lines).join('\n'),
   };
+}
+
+async function runBrowserTask({ rawCookies, chromium, executablePath, delay }) {
+  const browser = await chromium.launch({
+    executablePath,
+    headless: true,
+    args: ['--no-sandbox', '--disable-dev-shm-usage'],
+  });
+  try {
+    return await runAll({
+      rawCookies,
+      delay,
+      sessionFactory: (cookie) => createBrowserSession(browser, cookie),
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
+function getBrowserRuntime({
+  loadModule = () => require('playwright-core'),
+  existsSync = fs.existsSync,
+  env = process.env,
+} = {}) {
+  let playwright;
+  try {
+    playwright = loadModule();
+  } catch {
+    throw new Error('缺少 playwright-core，请在青龙“依赖管理 → NodeJS”中安装 playwright-core');
+  }
+
+  const candidates = [
+    env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].filter(Boolean);
+  const executablePath = candidates.find((file) => existsSync(file));
+  if (!executablePath) {
+    throw new Error('缺少 Chromium；Alpine 青龙请在终端执行：apk add --no-cache chromium');
+  }
+  if (!playwright?.chromium) throw new Error('playwright-core 未提供 Chromium 驱动');
+  return { chromium: playwright.chromium, executablePath };
 }
 
 function notificationCandidates() {
@@ -323,9 +352,10 @@ async function sendQinglongNotification(
 
 async function main() {
   try {
-    const result = await runAll({
+    const runtime = getBrowserRuntime();
+    const result = await runBrowserTask({
       rawCookies: process.env.JJ_COOKIE,
-      request: createHttpRequester(),
+      ...runtime,
     });
     console.log(result.summary);
     await sendQinglongNotification('掘金签到', result.summary);
@@ -350,8 +380,9 @@ module.exports = {
   parseHttpJsonResponse,
   createPageRequester,
   createBrowserSession,
-  createHttpRequester,
+  getBrowserRuntime,
   runAccount,
   runAll,
+  runBrowserTask,
   sendQinglongNotification,
 };

@@ -15,6 +15,8 @@ const {
   parseHttpJsonResponse,
   createPageRequester,
   createBrowserSession,
+  getBrowserRuntime,
+  runBrowserTask,
   runAccount,
   runAll,
   sendQinglongNotification,
@@ -249,6 +251,66 @@ test('runAll continues after one account fails', async () => {
   ]);
   assert.match(result.summary, /账号1/);
   assert.match(result.summary, /账号2/);
+});
+
+test('runAll closes each browser session after processing its account', async () => {
+  const closed = [];
+  const result = await runAll({
+    rawCookies: 'sessionid=first\nsessionid=second',
+    delay: async () => {},
+    sessionFactory: async (cookie) => ({
+      request: async ({ url }) => (url.includes('lottery_config')
+        ? { err_no: 0, err_msg: 'success', data: { free_count: 0 } }
+        : { err_no: 0, err_msg: 'success', data: { incr_point: 5 } }),
+      close: async () => { closed.push(cookie); },
+    }),
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(closed, ['sessionid=first', 'sessionid=second']);
+});
+
+test('runBrowserTask always closes Chromium', async () => {
+  const events = [];
+  const browser = {
+    async newContext() { throw new Error('should not create a context without accounts'); },
+    async close() { events.push('browser-close'); },
+  };
+  const chromium = {
+    async launch(options) { events.push(['launch', options]); return browser; },
+  };
+
+  await assert.rejects(
+    runBrowserTask({ rawCookies: '', chromium, executablePath: '/usr/bin/chromium' }),
+    /未配置 JJ_COOKIE/,
+  );
+  assert.equal(events[0][0], 'launch');
+  assert.deepEqual(events.at(-1), 'browser-close');
+});
+
+test('getBrowserRuntime resolves Alpine Chromium and playwright-core', () => {
+  const chromium = { launch() {} };
+  const runtime = getBrowserRuntime({
+    loadModule: () => ({ chromium }),
+    existsSync: (file) => file === '/usr/bin/chromium',
+    env: {},
+  });
+
+  assert.deepEqual(runtime, {
+    chromium,
+    executablePath: '/usr/bin/chromium',
+  });
+});
+
+test('getBrowserRuntime explains how to install missing dependencies', () => {
+  assert.throws(
+    () => getBrowserRuntime({
+      loadModule: () => { throw new Error('module not found'); },
+      existsSync: () => false,
+      env: {},
+    }),
+    /playwright-core.*依赖管理/s,
+  );
 });
 
 test('runAll rejects an empty account configuration', async () => {
