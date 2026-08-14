@@ -110,6 +110,23 @@ test('parseHttpJsonResponse identifies an empty authenticated response', () => {
 test('createPageRequester sends the signed base parameters through the page', async () => {
   let pageInput;
   const page = {
+    async waitForRequest(predicate) {
+      await Promise.resolve();
+      assert.equal(predicate({
+        url: () => `${pageInput.url}&msToken=other&a_bogus=other`,
+        method: () => 'GET',
+      }), false);
+      assert.equal(predicate({
+        url: () => `${pageInput.url.replace('uuid=1234567890123456789', 'uuid=other')}&msToken=other&a_bogus=other`,
+        method: () => 'POST',
+      }), false);
+      const request = {
+        url: () => `${pageInput.url}&msToken=test-token&a_bogus=test-signature`,
+        method: () => 'POST',
+      };
+      assert.equal(predicate(request), true);
+      return request;
+    },
     async evaluate(_callback, input) {
       pageInput = input;
       return {
@@ -133,6 +150,31 @@ test('createPageRequester sends the signed base parameters through the page', as
   assert.equal(pageInput.method, 'POST');
   assert.deepEqual(pageInput.body, {});
   assert.equal(response.err_no, 0);
+});
+
+test('createPageRequester rejects a request when Juejin does not add dynamic signatures', async () => {
+  let pageInput;
+  const page = {
+    async waitForRequest(predicate) {
+      await Promise.resolve();
+      const request = { url: () => pageInput.url, method: () => 'POST' };
+      assert.equal(predicate(request), true);
+      return request;
+    },
+    async evaluate(_callback, input) {
+      pageInput = input;
+      return { status: 200, text: '' };
+    },
+  };
+
+  await assert.rejects(
+    createPageRequester(page, '123')({
+      url: 'https://api.juejin.cn/growth_api/v1/check_in',
+      method: 'POST',
+      body: {},
+    }),
+    /安全签名未生成.*msToken.*a_bogus/,
+  );
 });
 
 test('createBrowserSession injects cookies and closes its isolated context', async () => {
@@ -164,7 +206,7 @@ test('createBrowserSession injects cookies and closes its isolated context', asy
   assert.equal(events[1][0], 'cookies');
   assert.deepEqual(events.find((event) => event[0] === 'goto').slice(1), [
     'https://juejin.cn/',
-    'networkidle',
+    'domcontentloaded',
   ]);
   assert.deepEqual(events.at(-1), ['close']);
 });

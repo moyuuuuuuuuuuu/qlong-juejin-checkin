@@ -110,7 +110,19 @@ function createPageRequester(page, uuid) {
     apiUrl.searchParams.set('uuid', uuid);
     apiUrl.searchParams.set('spider', '0');
 
-    const response = await page.evaluate(
+    const outgoingRequest = page.waitForRequest(
+      (request) => {
+        const candidate = new URL(request.url());
+        return candidate.origin === apiUrl.origin
+          && candidate.pathname === apiUrl.pathname
+          && request.method().toUpperCase() === method.toUpperCase()
+          && candidate.searchParams.get('aid') === '2608'
+          && candidate.searchParams.get('uuid') === uuid
+          && candidate.searchParams.get('spider') === '0';
+      },
+      { timeout: 15000 },
+    );
+    const responsePromise = page.evaluate(
       ({ url: requestUrl, method: requestMethod, body: requestBody }) => new Promise(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -127,6 +139,12 @@ function createPageRequester(page, uuid) {
       { url: apiUrl.toString(), method, body },
     );
 
+    const [response, signedRequest] = await Promise.all([responsePromise, outgoingRequest]);
+    const finalUrl = new URL(signedRequest.url());
+    if (!finalUrl.searchParams.get('msToken') || !finalUrl.searchParams.get('a_bogus')) {
+      throw new Error('掘金安全签名未生成（缺少 msToken 或 a_bogus），请检查 Chromium 是否正常加载首页');
+    }
+
     return parseHttpJsonResponse(response.status, response.text);
   };
 }
@@ -142,7 +160,7 @@ async function createBrowserSession(browser, cookie, { userAgent } = {}) {
       return route.continue();
     });
     await page.goto('https://juejin.cn/', {
-      waitUntil: 'networkidle',
+      waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
     await page.waitForTimeout(3000);
