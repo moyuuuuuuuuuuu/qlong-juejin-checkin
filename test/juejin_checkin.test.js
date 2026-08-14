@@ -10,6 +10,7 @@ const {
   parseCookies,
   businessResult,
   redact,
+  parseHttpJsonResponse,
   runAccount,
   runAll,
   sendQinglongNotification,
@@ -54,6 +55,25 @@ test('redact removes every configured cookie', () => {
     redact('request sessionid=secret failed', ['sessionid=secret']),
     'request [REDACTED] failed',
   );
+});
+
+test('parseHttpJsonResponse identifies an empty authenticated response', () => {
+  assert.throws(
+    () => parseHttpJsonResponse(200, ''),
+    /接口返回空响应，Cookie 可能已失效或被掘金拒绝/,
+  );
+});
+
+test('runAccount rejects a cookie without sessionid before making a request', async () => {
+  let calls = 0;
+  const result = await runAccount('passport_csrf_token=test', 1, async () => {
+    calls += 1;
+    return {};
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.ok, false);
+  assert.match(result.lines.join('\n'), /Cookie 缺少非空 sessionid/);
 });
 
 test('runAccount signs in and uses one free draw', async () => {

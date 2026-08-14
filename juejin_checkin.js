@@ -46,6 +46,20 @@ function redact(text, cookies = []) {
   );
 }
 
+function parseHttpJsonResponse(statusCode, text) {
+  if (statusCode < 200 || statusCode >= 300) {
+    throw new Error(`HTTP ${statusCode}`);
+  }
+  if (!text.trim()) {
+    throw new Error('接口返回空响应，Cookie 可能已失效或被掘金拒绝');
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('接口返回了无效 JSON，可能触发了掘金风控');
+  }
+}
+
 function createHttpRequester({ timeoutMs = 15000 } = {}) {
   return ({ url, method = 'GET', cookie, body }) => new Promise((resolve, reject) => {
     const payload = body === undefined ? '' : JSON.stringify(body);
@@ -64,14 +78,10 @@ function createHttpRequester({ timeoutMs = 15000 } = {}) {
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => {
         const text = Buffer.concat(chunks).toString('utf8');
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          reject(new Error(`HTTP ${response.statusCode}`));
-          return;
-        }
         try {
-          resolve(JSON.parse(text));
-        } catch {
-          reject(new Error('接口返回了无效 JSON'));
+          resolve(parseHttpJsonResponse(response.statusCode, text));
+        } catch (error) {
+          reject(error);
         }
       });
     });
@@ -100,6 +110,10 @@ function checkInLine(data = {}) {
 
 async function runAccount(cookie, accountIndex, request) {
   const lines = [`账号${accountIndex}`];
+  if (!/(?:^|;\s*)sessionid=[^;\s]+/.test(cookie)) {
+    lines.push('Cookie 缺少非空 sessionid，请从已登录的掘金请求中重新复制完整 Cookie');
+    return { ok: false, lines };
+  }
   try {
     const checkIn = businessResult(await request({
       url: ENDPOINTS.checkIn,
@@ -238,6 +252,7 @@ module.exports = {
   parseCookies,
   businessResult,
   redact,
+  parseHttpJsonResponse,
   createHttpRequester,
   runAccount,
   runAll,

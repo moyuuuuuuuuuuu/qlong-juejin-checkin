@@ -101,6 +101,8 @@ sessionid=...; passport_csrf_token=...
 
 通常是 Cookie 已失效。重新登录掘金并更新完整 Cookie，避免只复制 `sessionid` 的局部值。
 
+如果提示“Cookie 缺少非空 sessionid”，说明环境变量内容不是有效的完整 Cookie。如果提示“接口返回空响应”，说明 Cookie 虽包含 `sessionid`，但登录状态已经失效或请求被掘金拒绝。两种情况都应重新登录掘金，从 `api.juejin.cn` 请求的 Request Headers 中复制最新完整 Cookie。
+
 ### 签到成功但没有抽奖
 
 脚本只使用当天的免费抽奖次数。如果接口返回的 `free_count` 为 0，脚本会跳过抽奖，绝不会自动消耗矿石。
