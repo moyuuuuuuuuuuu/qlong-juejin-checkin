@@ -139,14 +139,43 @@ function createPageRequester(page, uuid) {
       { url: apiUrl.toString(), method, body },
     );
 
-    const [response, signedRequest] = await Promise.all([responsePromise, outgoingRequest]);
-    const finalUrl = new URL(signedRequest.url());
-    if (!finalUrl.searchParams.get('msToken') || !finalUrl.searchParams.get('a_bogus')) {
-      throw new Error('掘金安全签名未生成（缺少 msToken 或 a_bogus），请检查 Chromium 是否正常加载首页');
+    const [responseResult, requestResult] = await Promise.allSettled([
+      responsePromise,
+      outgoingRequest,
+    ]);
+    if (requestResult.status === 'fulfilled') {
+      const finalUrl = new URL(requestResult.value.url());
+      if (!finalUrl.searchParams.get('msToken') || !finalUrl.searchParams.get('a_bogus')) {
+        throw new Error('掘金安全签名未生成（缺少 msToken 或 a_bogus），请检查 Chromium 是否正常加载首页');
+      }
     }
+    if (responseResult.status === 'rejected') throw responseResult.reason;
+    if (requestResult.status === 'rejected') throw requestResult.reason;
 
-    return parseHttpJsonResponse(response.status, response.text);
+    return parseHttpJsonResponse(responseResult.value.status, responseResult.value.text);
   };
+}
+
+async function waitForSecuritySdk(
+  request,
+  {
+    attempts = 10,
+    delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  } = {},
+) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await request({
+        url: ENDPOINTS.lotteryConfig,
+        method: 'GET',
+      });
+      return;
+    } catch (error) {
+      const isUnsigned = /安全签名未生成/.test(String(error?.message ?? error));
+      if (!isUnsigned || attempt === attempts) throw error;
+      await delay(2000);
+    }
+  }
 }
 
 async function createBrowserSession(browser, cookie, { userAgent } = {}) {
@@ -160,12 +189,15 @@ async function createBrowserSession(browser, cookie, { userAgent } = {}) {
       return route.continue();
     });
     await page.goto('https://juejin.cn/', {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'load',
       timeout: 30000,
     });
-    await page.waitForTimeout(3000);
+    const request = createPageRequester(page, extractJuejinUuid(cookie));
+    await waitForSecuritySdk(request, {
+      delay: (milliseconds) => page.waitForTimeout(milliseconds),
+    });
     return {
-      request: createPageRequester(page, extractJuejinUuid(cookie)),
+      request,
       close: () => context.close(),
     };
   } catch (error) {
@@ -408,6 +440,7 @@ module.exports = {
   redact,
   parseHttpJsonResponse,
   createPageRequester,
+  waitForSecuritySdk,
   createBrowserSession,
   getBrowserRuntime,
   runAccount,

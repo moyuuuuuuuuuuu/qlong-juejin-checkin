@@ -15,6 +15,7 @@ const {
   redact,
   parseHttpJsonResponse,
   createPageRequester,
+  waitForSecuritySdk,
   createBrowserSession,
   getBrowserRuntime,
   runBrowserTask,
@@ -152,7 +153,7 @@ test('createPageRequester sends the signed base parameters through the page', as
   assert.equal(response.err_no, 0);
 });
 
-test('createPageRequester rejects a request when Juejin does not add dynamic signatures', async () => {
+test('createPageRequester reports missing signatures even when the unsigned XHR also fails', async () => {
   let pageInput;
   const page = {
     async waitForRequest(predicate) {
@@ -163,7 +164,7 @@ test('createPageRequester rejects a request when Juejin does not add dynamic sig
     },
     async evaluate(_callback, input) {
       pageInput = input;
-      return { status: 200, text: '' };
+      throw new Error('浏览器请求网络错误');
     },
   };
 
@@ -177,12 +178,51 @@ test('createPageRequester rejects a request when Juejin does not add dynamic sig
   );
 });
 
+test('waitForSecuritySdk retries only unsigned read-only probes until signing is ready', async () => {
+  const calls = [];
+  const delays = [];
+  const request = async (input) => {
+    calls.push(input);
+    if (calls.length < 3) {
+      throw new Error('掘金安全签名未生成（缺少 msToken 或 a_bogus）');
+    }
+    return { err_no: 0, err_msg: 'success', data: { free_count: 1 } };
+  };
+
+  await waitForSecuritySdk(request, {
+    attempts: 4,
+    delay: async (milliseconds) => delays.push(milliseconds),
+  });
+
+  assert.equal(calls.length, 3);
+  assert.deepEqual(delays, [2000, 2000]);
+  assert.deepEqual(calls.map(({ url, method }) => [url, method]), [
+    ['https://api.juejin.cn/growth_api/v1/lottery_config/get', 'GET'],
+    ['https://api.juejin.cn/growth_api/v1/lottery_config/get', 'GET'],
+    ['https://api.juejin.cn/growth_api/v1/lottery_config/get', 'GET'],
+  ]);
+});
+
 test('createBrowserSession injects cookies and closes its isolated context', async () => {
   const events = [];
+  let pageInput;
   const page = {
     async route(pattern) { events.push(['route', pattern]); },
     async goto(url, options) { events.push(['goto', url, options.waitUntil]); },
     async waitForTimeout(milliseconds) { events.push(['wait', milliseconds]); },
+    async waitForRequest(predicate) {
+      await Promise.resolve();
+      const request = {
+        url: () => `${pageInput.url}&msToken=test-token&a_bogus=test-signature`,
+        method: () => pageInput.method,
+      };
+      assert.equal(predicate(request), true);
+      return request;
+    },
+    async evaluate(_callback, input) {
+      pageInput = input;
+      return { status: 200, text: '{"err_no":0,"err_msg":"success","data":{}}' };
+    },
   };
   const context = {
     async addCookies(cookies) { events.push(['cookies', cookies]); },
@@ -206,7 +246,7 @@ test('createBrowserSession injects cookies and closes its isolated context', asy
   assert.equal(events[1][0], 'cookies');
   assert.deepEqual(events.find((event) => event[0] === 'goto').slice(1), [
     'https://juejin.cn/',
-    'domcontentloaded',
+    'load',
   ]);
   assert.deepEqual(events.at(-1), ['close']);
 });
